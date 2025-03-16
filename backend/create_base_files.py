@@ -1,30 +1,78 @@
 import pandas as pd
-from datetime import datetime, timedelta
+from pathlib import Path
+from datetime import datetime
 
-def create_base_files():
-    # Criar dados para o primeiro arquivo
-    data1 = {
-        'data_atualizacao': [datetime.now().strftime('%Y-%m-%d')],
-        'hora_atualizacao': [datetime.now().strftime('%H:%M:%S')],
-        'nome_teste': ['Arquivo Base 1']
+# Estrutura de categorias e páginas
+report_types = [
+    { 
+        'id': 'plantio',
+        'name': 'Plantio',
+        'pages': [
+            { 'id': 'frente1', 'name': 'Frente 1' }
+        ]
+    },
+    {
+        'id': 'colheita',
+        'name': 'Colheita',
+        'pages': [
+            { 'id': 'arakaki', 'name': 'Arakaki' },
+            { 'id': 'ituiutaba', 'name': 'Ituiutaba' },
+            { 'id': 'iturama', 'name': 'Iturama' },
+            { 'id': 'ouroeste', 'name': 'Ouroeste' },
+            { 'id': 'zirleno', 'name': 'Zirleno' }
+        ]
+    },
+    {
+        'id': 'cav',
+        'name': 'CAV',
+        'pages': [
+            { 'id': 'frente1', 'name': 'Frente 1' },
+            { 'id': 'frente2', 'name': 'Frente 2' },
+            { 'id': 'frente3', 'name': 'Frente 3' },
+            { 'id': 'frente4', 'name': 'Frente 4' }
+        ]
+    },
+    {
+        'id': 'bonificacoes',
+        'name': 'Bonificações',
+        'pages': [
+            { 'id': 'geral', 'name': 'Geral' },
+            { 'id': 'individual', 'name': 'Individual' }
+        ]
     }
+]
 
-    # Criar dados para o segundo arquivo (com data anterior)
-    data2 = {
-        'data_atualizacao': [(datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')],
-        'hora_atualizacao': [(datetime.now() - timedelta(days=1)).strftime('%H:%M:%S')],
-        'nome_teste': ['Arquivo Base 2']
-    }
+def create_empty_base_file(category: str, page: str):
+    """Cria um arquivo base vazio para uma categoria e página específicas."""
+    # Criar diretório local_base_files se não existir
+    base_dir = Path('local_base_files')
+    base_dir.mkdir(exist_ok=True)
+    
+    # Nome do arquivo base
+    filename = f"base_{category}_{page}.xlsx"
+    filepath = base_dir / filename
+    
+    # Criar DataFrame vazio com colunas básicas
+    now = datetime.now()
+    df = pd.DataFrame({
+        'data_atualizacao': [now.strftime('%Y-%m-%d')],
+        'hora_atualizacao': [now.strftime('%H:%M:%S')],
+        'nome_teste': ['Arquivo Base']
+    })
+    
+    # Salvar arquivo
+    df.to_excel(filepath, index=False)
+    print(f"Arquivo base criado: {filepath}")
 
-    # Criar DataFrames
-    df1 = pd.DataFrame(data1)
-    df2 = pd.DataFrame(data2)
-
-    # Salvar arquivos
-    df1.to_excel('base_vendas.xlsx', index=False)
-    df2.to_excel('base_estoque.xlsx', index=False)
-
-    print("Arquivos base criados com sucesso!")
+def main():
+    """Cria todos os arquivos base vazios."""
+    print("=== CRIANDO ARQUIVOS BASE VAZIOS ===")
+    
+    for category in report_types:
+        for page in category['pages']:
+            create_empty_base_file(category['id'], page['id'])
+    
+    print("\nTodos os arquivos base foram criados com sucesso!")
 
 if __name__ == "__main__":
-    create_base_files() 
+    main() 

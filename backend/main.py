@@ -43,6 +43,14 @@ STORAGE_BUCKET = "arquivos-bi"
 STORAGE_BASE_FOLDER = "basefiles"  # Pasta para arquivos base/referência
 STORAGE_UPLOAD_FOLDER = "uploaded"  # Pasta para arquivos enviados
 
+# Definir categorias e páginas
+REPORT_STRUCTURE = {
+    'plantio': ['frente1'],
+    'colheita': ['arakaki', 'ituiutaba', 'iturama', 'ouroeste', 'zirleno'],
+    'cav': ['frente1', 'frente2', 'frente3', 'frente4'],
+    'bonificacoes': ['geral', 'individual']
+}
+
 class LocalVersionControl:
     def __init__(self):
         self.versions: Dict[str, str] = {}
@@ -111,8 +119,8 @@ async def download_from_supabase(storage_path: str, local_path: Path):
         # Baixar o conteúdo do arquivo
         response = supabase.storage.from_(STORAGE_BUCKET).download(storage_path)
         
-        # Garantir que o arquivo base local sempre tenha o mesmo nome
-        final_path = LOCAL_BASE_DIR / f"base_{local_path.stem.split('_')[0]}.xlsx"
+        # Usar o nome do arquivo conforme passado no parâmetro local_path
+        final_path = local_path
         print(f"Salvando em: {final_path}")
         
         # Remover arquivo existente se houver
@@ -147,11 +155,13 @@ async def download_from_supabase(storage_path: str, local_path: Path):
         print(f"Detalhes do erro: {str(e)}")
         return False
 
-async def get_base_file_info(report_type: str):
+async def get_base_file_info(category: str, page: str):
     """Obtém informações do arquivo base atual."""
     try:
         response = supabase.table("file_management").select("*").eq(
-            "report_type", report_type
+            "category", category
+        ).eq(
+            "page", page
         ).eq("is_base_file", True).execute()
         
         if response.data:
@@ -196,38 +206,36 @@ async def ensure_storage_folders():
     """Garante que as pastas necessárias existam no Storage."""
     print("\n=== VERIFICANDO ESTRUTURA DO STORAGE ===")
     try:
-        # Lista de pastas necessárias para cada tipo de relatório
-        report_types = ['vendas', 'estoque', 'financeiro', 'clientes']
-        
-        # Criar estrutura base
-        for report_type in report_types:
-            # Pasta base
-            base_path = f"{STORAGE_BASE_FOLDER}/{report_type}/.keep"
-            try:
-                print(f"Verificando pasta base: {base_path}")
-                supabase.storage.from_(STORAGE_BUCKET).upload(
-                    base_path,
-                    b"",  # arquivo vazio
-                    {"content-type": "text/plain"}
-                )
-                print(f"Pasta base criada: {base_path}")
-            except Exception as e:
-                if "Duplicate" not in str(e):
-                    print(f"Erro ao criar pasta base: {e}")
-            
-            # Pasta uploaded
-            upload_path = f"{STORAGE_UPLOAD_FOLDER}/{report_type}/.keep"
-            try:
-                print(f"Verificando pasta upload: {upload_path}")
-                supabase.storage.from_(STORAGE_BUCKET).upload(
-                    upload_path,
-                    b"",  # arquivo vazio
-                    {"content-type": "text/plain"}
-                )
-                print(f"Pasta upload criada: {upload_path}")
-            except Exception as e:
-                if "Duplicate" not in str(e):
-                    print(f"Erro ao criar pasta upload: {e}")
+        # Criar estrutura para cada categoria e página
+        for category, pages in REPORT_STRUCTURE.items():
+            for page in pages:
+                # Pasta base
+                base_path = f"{STORAGE_BASE_FOLDER}/{category}/{page}/.keep"
+                try:
+                    print(f"Verificando pasta base: {base_path}")
+                    supabase.storage.from_(STORAGE_BUCKET).upload(
+                        base_path,
+                        b"",  # arquivo vazio
+                        {"content-type": "text/plain"}
+                    )
+                    print(f"Pasta base criada: {base_path}")
+                except Exception as e:
+                    if "Duplicate" not in str(e):
+                        print(f"Erro ao criar pasta base: {e}")
+                
+                # Pasta uploaded
+                upload_path = f"{STORAGE_UPLOAD_FOLDER}/{category}/{page}/.keep"
+                try:
+                    print(f"Verificando pasta upload: {upload_path}")
+                    supabase.storage.from_(STORAGE_BUCKET).upload(
+                        upload_path,
+                        b"",  # arquivo vazio
+                        {"content-type": "text/plain"}
+                    )
+                    print(f"Pasta upload criada: {upload_path}")
+                except Exception as e:
+                    if "Duplicate" not in str(e):
+                        print(f"Erro ao criar pasta upload: {e}")
         
         print("Estrutura de pastas verificada/criada com sucesso")
     except Exception as e:
@@ -245,11 +253,19 @@ async def startup_event():
 async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    reportType: str = Form(...)
+    category: str = Form(...),
+    page: str = Form(...)
 ):
     print(f"\n=== NOVO UPLOAD INICIADO ===")
-    print(f"Tipo de relatório: {reportType}")
+    print(f"Categoria: {category}")
+    print(f"Página: {page}")
     print(f"Nome do arquivo: {file.filename}")
+
+    # Validar categoria e página
+    if category not in REPORT_STRUCTURE:
+        raise HTTPException(status_code=400, detail="Categoria inválida")
+    if page not in REPORT_STRUCTURE[category]:
+        raise HTTPException(status_code=400, detail="Página inválida")
 
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Apenas arquivos Excel são permitidos")
@@ -274,22 +290,23 @@ async def upload_file(
         print(f"Data de modificação do arquivo: {last_modified}")
 
         # Verificar se já existe um arquivo base
-        base_file = await get_base_file_info(reportType)
+        base_file = await get_base_file_info(category, page)
         print(f"Arquivo base existente: {base_file}")
         
         # Preparar nome do arquivo base
-        base_filename = f"base_{reportType}.xlsx"
-        base_storage_path = f"{STORAGE_BASE_FOLDER}/{reportType}/{base_filename}"
+        base_filename = f"base_{category}_{page}.xlsx"
+        base_storage_path = f"{STORAGE_BASE_FOLDER}/{category}/{page}/{base_filename}"
         print(f"Caminho do arquivo base: {base_storage_path}")
         
         # Salvar arquivo na pasta de uploads (histórico)
-        upload_storage_path = f"{STORAGE_UPLOAD_FOLDER}/{reportType}/{file_id}_{file.filename}"
+        upload_storage_path = f"{STORAGE_UPLOAD_FOLDER}/{category}/{page}/{file_id}_{file.filename}"
         print(f"Salvando em uploaded/: {upload_storage_path}")
         await upload_to_supabase(temp_file_path, STORAGE_BUCKET, upload_storage_path)
         print("Upload para histórico concluído")
 
         file_data = {
-            "report_type": reportType,
+            "category": category,
+            "page": page,
             "original_filename": file.filename,
             "storage_path": upload_storage_path,
             "status": "completed",
@@ -299,25 +316,21 @@ async def upload_file(
 
         if not base_file:
             print("\n=== CRIANDO PRIMEIRO ARQUIVO BASE ===")
-            # Se não existe arquivo base, este será o primeiro
             print(f"Tentando criar arquivo base em: {base_storage_path}")
             await upload_to_supabase(temp_file_path, STORAGE_BUCKET, base_storage_path)
             print("Upload do arquivo base concluído")
             
-            # Atualizar dados para arquivo base
             file_data["is_base_file"] = True
             file_data["storage_path"] = base_storage_path
             
-            # Inserir registro na tabela
             print("Inserindo registro na tabela file_management")
             response = supabase.table("file_management").insert(file_data).execute()
             print(f"Registro inserido: {response.data}")
             
-            # Atualizar arquivo base local
             local_path = LOCAL_BASE_DIR / base_filename
             print(f"Baixando arquivo base para: {local_path}")
             await download_from_supabase(base_storage_path, local_path)
-            version_control.update_version(reportType, file_id)
+            version_control.update_version(f"{category}_{page}", file_id)
             print("Arquivo base local atualizado")
             
             return {"message": "Arquivo base criado com sucesso"}
@@ -330,36 +343,30 @@ async def upload_file(
         
         if last_modified > base_date:
             print("Novo arquivo é mais recente, atualizando base")
-            # Deletar arquivo base antigo antes de fazer upload do novo
             await delete_from_supabase(STORAGE_BUCKET, base_storage_path)
-            # Arquivo é mais novo, atualizar base
             await upload_to_supabase(temp_file_path, STORAGE_BUCKET, base_storage_path)
             print("Upload do novo arquivo base concluído")
             
-            # Atualizar registro do arquivo base antigo
             print("Atualizando registro antigo")
             supabase.table("file_management").update(
                 {"is_base_file": False}
             ).eq("id", base_file["id"]).execute()
             
-            # Criar novo registro para o arquivo base
             file_data["is_base_file"] = True
             file_data["storage_path"] = base_storage_path
             print("Inserindo novo registro base")
             response = supabase.table("file_management").insert(file_data).execute()
             print(f"Novo registro inserido: {response.data}")
             
-            # Atualizar arquivo base local
             local_path = LOCAL_BASE_DIR / base_filename
             print(f"Baixando novo arquivo base para: {local_path}")
             await download_from_supabase(base_storage_path, local_path)
-            version_control.update_version(reportType, file_id)
+            version_control.update_version(f"{category}_{page}", file_id)
             print("Arquivo base local atualizado")
             
             return {"message": "Arquivo base atualizado com sucesso"}
         else:
             print("Arquivo atual é mais antigo, mantendo base existente")
-            # Apenas registrar o arquivo enviado
             response = supabase.table("file_management").insert(file_data).execute()
             print(f"Registro de histórico inserido: {response.data}")
             return {"message": "Arquivo registrado, mas base mantida pois é mais recente"}
